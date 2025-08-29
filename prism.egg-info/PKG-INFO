@@ -1,22 +1,16 @@
 Metadata-Version: 2.4
 Name: prism
 Version: 0.0.1
-Summary: AI-Powered Image Intelligence Engine
-Home-page: https://github.com/olaoluwasubxmi/prism
-Author: Your Name
-Author-email: your.email@example.com
+Summary: AI-Powered Image Intelligence Engine - See what others can't
+Home-page: https://github.com/Prism-Intelligence/Prism
+Author: Prism Intelligence
+Author-email: dev@prism-intelligence.ai
 Classifier: Development Status :: 2 - Pre-Alpha
 Classifier: Intended Audience :: Developers
 Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
-Classifier: License :: OSI Approved :: MIT License
 Classifier: Programming Language :: Python :: 3
-Classifier: Programming Language :: Python :: 3.8
-Classifier: Programming Language :: Python :: 3.9
-Classifier: Programming Language :: Python :: 3.10
-Classifier: Programming Language :: Python :: 3.11
 Requires-Python: >=3.8
 Description-Content-Type: text/markdown
-License-File: LICENSE
 Requires-Dist: torch>=1.9.0
 Requires-Dist: torchvision>=0.10.0
 Requires-Dist: transformers>=4.20.0
@@ -25,19 +19,12 @@ Requires-Dist: clip-by-openai
 Requires-Dist: Pillow>=8.0.0
 Requires-Dist: numpy>=1.21.0
 Requires-Dist: requests>=2.25.0
-Provides-Extra: dev
-Requires-Dist: pytest>=6.0; extra == "dev"
-Requires-Dist: pytest-cov; extra == "dev"
-Requires-Dist: black; extra == "dev"
-Requires-Dist: flake8; extra == "dev"
 Dynamic: author
 Dynamic: author-email
 Dynamic: classifier
 Dynamic: description
 Dynamic: description-content-type
 Dynamic: home-page
-Dynamic: license-file
-Dynamic: provides-extra
 Dynamic: requires-dist
 Dynamic: requires-python
 Dynamic: summary

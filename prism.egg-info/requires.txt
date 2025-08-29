@@ -6,9 +6,3 @@ clip-by-openai
 Pillow>=8.0.0
 numpy>=1.21.0
 requests>=2.25.0
-
-[dev]
-pytest>=6.0
-pytest-cov
-black
-flake8
