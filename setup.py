@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 # Simple setup.py without license issues
 setup(
-    name="prism",
+    name="prismintelligence",
     version="0.0.1",
     author="Prism Intelligence",
     author_email="dev@prism-intelligence.ai",
