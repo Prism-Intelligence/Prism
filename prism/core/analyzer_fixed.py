@@ -23,36 +23,15 @@ class PrismAnalyzer:
             self.yolo_model = YOLO('yolov8n.pt')
             logger.info("YOLO model loaded successfully")
             
-            # Try to load BLIP models (with safetensors for security)
+            # Try to load BLIP models (with fallback)
             try:
-                # Use safetensors format to avoid PyTorch security issues
-                self.blip_processor = BlipProcessor.from_pretrained(
-                    "Salesforce/blip-image-captioning-base",
-                    use_safetensors=True
-                )
-                self.blip_model = BlipForConditionalGeneration.from_pretrained(
-                    "Salesforce/blip-image-captioning-base",
-                    use_safetensors=True
-                )
+                self.blip_processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+                self.blip_model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
                 self.has_blip = True
-                logger.info("BLIP model loaded successfully with safetensors")
+                logger.info("BLIP model loaded successfully")
             except Exception as blip_error:
                 logger.warning(f"BLIP model failed to load: {blip_error}")
-                # Try alternative lightweight model
-                try:
-                    from transformers import pipeline
-                    self.caption_pipeline = pipeline(
-                        "image-to-text", 
-                        model="nlpconnect/vit-gpt2-image-captioning",
-                        device="cpu"
-                    )
-                    self.has_blip = True
-                    self.blip_alternative = True
-                    logger.info("Alternative caption model loaded successfully")
-                except Exception as alt_error:
-                    logger.warning(f"Alternative caption model failed: {alt_error}")
-                    self.has_blip = False
-                    self.blip_alternative = False
+                self.has_blip = False
             
             # Try to load CLIP (with fallback)
             if HAS_CLIP:
@@ -89,9 +68,9 @@ class PrismAnalyzer:
             caption = self._generate_caption(image)
             scene_context = self._analyze_scene(image)
             
-            # Revolutionary relationship analysis (pass scene context)
+            # Revolutionary relationship analysis
             relationship_analysis = self.relationship_engine.analyze_relationships(
-                image_path, objects, scene_context, caption
+                image_path, objects
             )
             
             # Enhanced analysis with insights
@@ -134,9 +113,9 @@ class PrismAnalyzer:
         return objects
     
     def _generate_caption(self, image):
-        """Generate caption using BLIP, alternative model, or rule-based generation"""
+        """Generate caption using BLIP or rule-based generation"""
         # Try BLIP first
-        if self.has_blip and not hasattr(self, 'blip_alternative'):
+        if self.has_blip:
             try:
                 inputs = self.blip_processor(image, return_tensors="pt")
                 out = self.blip_model.generate(**inputs, max_length=50, do_sample=False)
@@ -144,17 +123,6 @@ class PrismAnalyzer:
                 return caption
             except Exception as e:
                 logger.warning(f"BLIP caption generation failed: {e}")
-        
-        # Try alternative model
-        elif self.has_blip and hasattr(self, 'blip_alternative') and self.blip_alternative:
-            try:
-                # Convert PIL image to format expected by pipeline
-                result = self.caption_pipeline(image)
-                if result and len(result) > 0:
-                    caption = result[0].get('generated_text', 'Caption generated')
-                    return caption
-            except Exception as e:
-                logger.warning(f"Alternative caption generation failed: {e}")
         
         # Fallback to rule-based caption generation
         return self._generate_rule_based_caption(image)

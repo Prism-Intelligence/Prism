@@ -1,4 +1,4 @@
-"""Main analysis engine for PRISM with Revolutionary Relationship Detection"""
+"""Main analysis engine for PRISM"""
 
 import torch
 from transformers import BlipProcessor, BlipForConditionalGeneration
@@ -23,36 +23,29 @@ class PrismAnalyzer:
             self.yolo_model = YOLO('yolov8n.pt')
             logger.info("YOLO model loaded successfully")
             
-            # Try to load BLIP models (with safetensors for security)
+            # Try to load BLIP models (with fallback)
             try:
-                # Use safetensors format to avoid PyTorch security issues
-                self.blip_processor = BlipProcessor.from_pretrained(
-                    "Salesforce/blip-image-captioning-base",
-                    use_safetensors=True
-                )
-                self.blip_model = BlipForConditionalGeneration.from_pretrained(
-                    "Salesforce/blip-image-captioning-base",
-                    use_safetensors=True
-                )
+                self.blip_processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+                self.blip_model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
                 self.has_blip = True
-                logger.info("BLIP model loaded successfully with safetensors")
+                logger.info("BLIP model loaded successfully")
             except Exception as blip_error:
                 logger.warning(f"BLIP model failed to load: {blip_error}")
-                # Try alternative lightweight model
+                self.has_blip = False
+                
+                # Try alternative caption model that works with current PyTorch
                 try:
                     from transformers import pipeline
-                    self.caption_pipeline = pipeline(
-                        "image-to-text", 
-                        model="nlpconnect/vit-gpt2-image-captioning",
-                        device="cpu"
-                    )
-                    self.has_blip = True
-                    self.blip_alternative = True
+                    self.caption_pipeline = pipeline("image-to-text", model="nlpconnect/vit-gpt2-image-captioning")
+                    self.has_alt_caption = True
                     logger.info("Alternative caption model loaded successfully")
                 except Exception as alt_error:
-                    logger.warning(f"Alternative caption model failed: {alt_error}")
-                    self.has_blip = False
-                    self.blip_alternative = False
+                    logger.warning(f"Alternative caption model failed to load: {alt_error}")
+                    self.has_alt_caption = False
+            
+            # Ensure we have the alt_caption flag even if BLIP loads
+            if not hasattr(self, 'has_alt_caption'):
+                self.has_alt_caption = False
             
             # Try to load CLIP (with fallback)
             if HAS_CLIP:
@@ -89,9 +82,9 @@ class PrismAnalyzer:
             caption = self._generate_caption(image)
             scene_context = self._analyze_scene(image)
             
-            # Revolutionary relationship analysis (pass scene context)
+            # Revolutionary relationship analysis
             relationship_analysis = self.relationship_engine.analyze_relationships(
-                image_path, objects, scene_context, caption
+                image_path, objects
             )
             
             # Enhanced analysis with insights
@@ -125,6 +118,7 @@ class PrismAnalyzer:
                     class_id = int(box.cls[0])
                     confidence = float(box.conf[0])
                     class_name = self.yolo_model.names[class_id]
+                    
                     if confidence > 0.5:
                         objects.append({
                             'name': class_name,
@@ -136,7 +130,7 @@ class PrismAnalyzer:
     def _generate_caption(self, image):
         """Generate caption using BLIP, alternative model, or rule-based generation"""
         # Try BLIP first
-        if self.has_blip and not hasattr(self, 'blip_alternative'):
+        if self.has_blip:
             try:
                 inputs = self.blip_processor(image, return_tensors="pt")
                 out = self.blip_model.generate(**inputs, max_length=50, do_sample=False)
@@ -146,9 +140,8 @@ class PrismAnalyzer:
                 logger.warning(f"BLIP caption generation failed: {e}")
         
         # Try alternative model
-        elif self.has_blip and hasattr(self, 'blip_alternative') and self.blip_alternative:
+        if hasattr(self, 'has_alt_caption') and self.has_alt_caption:
             try:
-                # Convert PIL image to format expected by pipeline
                 result = self.caption_pipeline(image)
                 if result and len(result) > 0:
                     caption = result[0].get('generated_text', 'Caption generated')
@@ -164,37 +157,39 @@ class PrismAnalyzer:
         try:
             # Get objects first
             objects = self._detect_objects(image)
-            object_names = [obj['name'] for obj in objects]
             
-            # Count people specifically
-            people_count = object_names.count('person')
-            cup_count = object_names.count('cup')
+            if not objects:
+                return "Image contains various elements"
             
-            # Generate caption based on patterns
-            if people_count >= 2:
-                if cup_count >= people_count * 0.5:  # Meeting with refreshments
-                    if people_count <= 5:
-                        return f"{people_count} people having a meeting with coffee"
-                    else:
-                        return f"Large group meeting with {people_count} people and refreshments"
+            # Count key object types
+            people_count = sum(1 for obj in objects if obj['name'] == 'person')
+            cups_count = sum(1 for obj in objects if obj['name'] == 'cup')
+            
+            # Generate caption based on objects
+            if people_count > 0:
+                if people_count == 1:
+                    base = "A person"
                 else:
-                    return f"{people_count} people in discussion"
-            elif people_count == 1:
-                if cup_count > 0:
-                    return "Person working with coffee"
+                    base = f"{people_count} people"
+                
+                # Add context
+                if cups_count > 1:
+                    return f"{base} having a meeting with coffee"
+                elif any(obj['name'] in ['laptop', 'computer'] for obj in objects):
+                    return f"{base} in a work setting"
+                elif any(obj['name'] in ['tie', 'suit'] for obj in objects):
+                    return f"{base} in a business meeting"
                 else:
-                    return "Individual work session"
+                    return f"{base} gathered together"
             else:
-                # No people detected, describe objects
-                unique_objects = list(set(object_names))
-                if len(unique_objects) == 0:
-                    return "Image analysis completed"
-                elif len(unique_objects) == 1:
-                    return f"Image contains {unique_objects[0]}"
-                elif len(unique_objects) == 2:
-                    return f"Image contains {unique_objects[0]} and {unique_objects[1]}"
+                # No people detected
+                object_names = [obj['name'] for obj in objects[:3]]  # Top 3 objects
+                if len(object_names) == 1:
+                    return f"Image shows a {object_names[0]}"
+                elif len(object_names) == 2:
+                    return f"Image contains {object_names[0]} and {object_names[1]}"
                 else:
-                    return f"Image contains {', '.join(unique_objects[:-1])}, and {unique_objects[-1]}"
+                    return f"Image contains {', '.join(object_names[:-1])}, and {object_names[-1]}"
                     
         except Exception as e:
             logger.warning(f"Rule-based caption generation failed: {e}")
@@ -249,118 +244,126 @@ class PrismAnalyzer:
         """Analyze scene context using CLIP"""
         if not self.has_clip:
             return {
-                'type': 'indoor office meeting',
-                'confidence': 0.6
+                'type': "Scene analysis unavailable (CLIP model not loaded)",
+                'confidence': 0.0
             }
         
         try:
-            scene_types = [
-                "indoor office meeting",
-                "outdoor park recreation", 
-                "home family gathering",
-                "restaurant dining",
-                "street urban activity",
-                "beach vacation",
-                "wedding celebration",
-                "business conference"
-            ]
-            
-            image_input = self.clip_preprocess(image).unsqueeze(0)
-            text_inputs = clip.tokenize(scene_types)
-            
-            with torch.no_grad():
-                logits_per_image, _ = self.clip_model(image_input, text_inputs)
-                probs = logits_per_image.softmax(dim=-1).cpu().numpy()[0]
-                best_idx = probs.argmax()
-                
-                return {
-                    'type': scene_types[best_idx],
-                    'confidence': float(probs[best_idx])
-                }
+        scene_types = [
+            "indoor office meeting", "outdoor park recreation", 
+            "home family gathering", "restaurant dining",
+            "street urban activity", "beach vacation",
+            "wedding celebration", "business conference"
+        ]
+        
+        image_input = self.clip_preprocess(image).unsqueeze(0)
+        text_inputs = clip.tokenize(scene_types)
+        
+        with torch.no_grad():
+            logits_per_image, _ = self.clip_model(image_input, text_inputs)
+            probs = logits_per_image.softmax(dim=-1).cpu().numpy()[0]
+        
+        best_idx = probs.argmax()
+        return {
+            'type': scene_types[best_idx],
+            'confidence': float(probs[best_idx])
+        }
         except Exception as e:
             logger.warning(f"Scene analysis failed: {e}")
             return {
-                'type': 'indoor office meeting',
-                'confidence': 0.6
-            }
+                'type': "Scene analysis failed",
+                'confidence': 0.0
+        }
     
     def _calculate_confidence(self, objects, caption):
-        """Calculate overall confidence score"""
-        try:
-            # Object detection confidence
-            object_conf = sum([obj['confidence'] for obj in objects]) / len(objects) if objects else 0.5
-            
-            # Caption quality (rule-based scoring)
-            caption_conf = 0.8 if "people" in caption.lower() or "meeting" in caption.lower() else 0.6
-            
-            # Combined confidence
-            overall_conf = (object_conf + caption_conf) / 2
-            
-            return min(overall_conf * 100, 95)  # Cap at 95% to be realistic
-        except Exception as e:
-            logger.warning(f"Confidence calculation failed: {e}")
-            return 60.0
+        """Calculate overall confidence score with better weighting"""
+        confidences = []
+        
+        # Object detection confidence (weighted heavily)
+        if objects:
+            avg_detection_conf = sum([obj['confidence'] for obj in objects]) / len(objects)
+            confidences.append(avg_detection_conf * 0.6)  # 60% weight
+        
+        # Caption quality assessment
+        if caption and "unavailable" not in caption.lower() and "failed" not in caption.lower():
+            # Better caption quality scoring
+            caption_score = min(len(caption.split()) / 8.0, 1.0) * 0.8  # Longer captions = better
+            confidences.append(caption_score * 0.3)  # 30% weight
+        
+        # Scene detection boost (CLIP is usually confident)
+        confidences.append(0.85 * 0.1)  # 10% weight, CLIP baseline
+        
+        overall_confidence = sum(confidences) if confidences else 0.5
+        
+        return {
+            'overall': min(overall_confidence, 0.95),  # Cap at 95%
+            'object_detection': avg_detection_conf if objects else 0.0,
+            'scene_understanding': caption_score if 'caption_score' in locals() else 0.0
+        }
     
-    def _generate_insights(self, base_results):
-        """Generate enhanced insights from base analysis"""
-        objects = base_results['objects']
+    def _generate_insights(self, results):
+        """Generate rich, human-like insights from analysis"""
+        objects = results['objects']
+        scene = results['scene']['type'] if isinstance(results['scene'], dict) else results['scene']
+        summary = results['summary']
+        
+        # Count objects for insights
         object_names = [obj['name'] for obj in objects]
         people_count = object_names.count('person')
         cup_count = object_names.count('cup')
-        scene = base_results['scene']['type'] if isinstance(base_results['scene'], dict) else base_results['scene']
-        confidence = base_results['confidence']
         
-        # Create instant insight
+        # Generate instant insight
         instant_insight = self._create_instant_insight(people_count, cup_count, scene, object_names)
         
-        # Create understanding context
+        # Generate understanding
         understanding = self._analyze_understanding(scene, object_names, people_count)
         
         # Generate detailed insights
         insights = self._generate_detailed_insights(object_names, people_count, cup_count, scene)
         
-        # Categorize objects
-        details = self._categorize_objects(object_names)
-        
-        return {
+        # Create enhanced output
+        enhanced = {
             'instant_insight': instant_insight,
-            'confidence': confidence,
+            'confidence': results['confidence']['overall'] * 100,  # Convert to percentage
+            
             'understanding': understanding,
+            
+            'details': {
+                'people_count': people_count,
+                'objects': self._categorize_objects(object_names),
+                'scene_type': scene
+            },
+            
             'insights': insights,
-            'details': details,
-            'summary': base_results['summary'],
-            'scene': scene,
-            'objects': objects
+            
+            'raw': results  # Keep original output
         }
+        
+        return enhanced
     
     def _create_instant_insight(self, people_count, cup_count, scene, objects):
-        """Create the main instant insight"""
-        if people_count == 0:
-            return "Scene analysis complete - no people detected"
-        elif people_count == 1:
-            if cup_count > 0:
-                return "Individual work session with refreshments"
-            else:
-                return "Solo activity detected"
-        elif people_count <= 5:
+        """Create a compelling instant insight"""
+        if 'office' in scene.lower() and people_count > 1:
             if cup_count >= 3:
                 return f"Business meeting in progress - {people_count} people collaborating over coffee"
             else:
-                return f"Small group interaction with {people_count} people"
+                return f"Professional team meeting with {people_count} colleagues"
+        elif people_count > 1:
+            return f"Group gathering with {people_count} people"
         else:
-            return f"Large group gathering with {people_count} people"
+            return "Individual scene analysis"
     
     def _analyze_understanding(self, scene, objects, people_count):
-        """Analyze the contextual understanding"""
+        """Analyze the deeper understanding of the scene"""
         understanding = {}
         
-        # What is happening
-        if people_count > 1 and 'cup' in objects:
-            understanding['what'] = "Professional team meeting with refreshments"
+        # What's happening
+        if 'office' in scene.lower() and 'laptop' in objects:
+            understanding['what'] = "Professional team meeting with laptops and documents"
         elif people_count > 1:
-            understanding['what'] = "Group discussion or collaboration"
+            understanding['what'] = f"Group interaction with {people_count} people"
         else:
-            understanding['what'] = "Individual activity"
+            understanding['what'] = "Individual or single-person scene"
         
         # Where
         if 'office' in scene.lower():
@@ -376,7 +379,7 @@ class PrismAnalyzer:
             understanding['activity'] = "Business discussion or presentation"
         elif people_count > 1:
             understanding['mood'] = "Collaborative, engaged"
-            understanding['activity'] = "Active discussion"
+            understanding['activity'] = "Active discussion - not a presentation"
         else:
             understanding['mood'] = "Individual focus"
             understanding['activity'] = "Personal work or study"
@@ -389,19 +392,19 @@ class PrismAnalyzer:
         
         # Coffee/meeting insights
         if cup_count >= 3 and people_count > 1:
-            insights.append(f"Extended meeting - {cup_count} coffee cups suggest long discussion")
+            insights.append(f"Long meeting - {cup_count} coffee cups suggest extended discussion")
         
         # Formality insights
         if 'tie' in objects and people_count > 1:
             formal_count = objects.count('tie')
             if formal_count == 1:
-                insights.append("Mixed formal/casual - only one person in formal attire")
+                insights.append("Mixed formal/casual - only one person in tie")
             else:
-                insights.append("Formal business setting - multiple people in business attire")
+                insights.append("Formal business setting - multiple ties visible")
         
         # Technology insights
         if 'laptop' in objects and people_count > 1:
-            insights.append("Collaborative setup - technology-enabled meeting")
+            insights.append("Collaborative setup - laptops open, people engaged")
         
         # Scene-specific insights
         if 'office' in scene.lower() and people_count >= 4:
@@ -415,30 +418,32 @@ class PrismAnalyzer:
             'people': [],
             'technology': [],
             'refreshments': [],
-            'business': []
+            'business': [],
+            'other': []
         }
         
+        # Count occurrences
+        object_counts = {}
         for obj in objects:
+            object_counts[obj] = object_counts.get(obj, 0) + 1
+        
+        # Categorize with counts
+        for obj, count in object_counts.items():
+            display_name = f"{obj}s ({count})" if count > 1 else obj
+            
             if obj == 'person':
-                categories['people'].append(obj)
-            elif obj in ['laptop', 'computer', 'phone', 'keyboard', 'mouse']:
-                categories['technology'].append(obj)
-            elif obj in ['cup', 'bottle', 'food', 'plate', 'glass']:
-                categories['refreshments'].append(obj)
-            elif obj in ['tie', 'suit', 'briefcase', 'book', 'paper']:
-                categories['business'].append(obj)
+                categories['people'].append(display_name)
+            elif obj in ['laptop', 'phone', 'computer', 'tablet']:
+                categories['technology'].append(display_name)
+            elif obj in ['cup', 'coffee', 'water', 'drink']:
+                categories['refreshments'].append(display_name)
+            elif obj in ['tie', 'suit', 'document', 'paper', 'book']:
+                categories['business'].append(display_name)
+            else:
+                categories['other'].append(display_name)
         
-        # Convert to readable format
-        readable_categories = {}
-        for category, items in categories.items():
-            if items:
-                unique_items = list(set(items))
-                if len(unique_items) == 1 and len(items) > 1:
-                    readable_categories[category] = [f"{unique_items[0]} ({len(items)})"]
-                else:
-                    readable_categories[category] = unique_items
-        
-        return {'objects': readable_categories}
+        # Remove empty categories
+        return {k: v for k, v in categories.items() if v}
 
 class AnalysisResult:
     """Enhanced container for analysis results"""
@@ -447,21 +452,36 @@ class AnalysisResult:
     
     @property
     def summary(self):
+        # Support both old and new format
+        if 'raw' in self.data:
+            return self.data['raw']['summary']
         return self.data.get('summary', 'No summary available')
     
     @property
     def objects(self):
+        # Support both old and new format
+        if 'raw' in self.data:
+            return [obj['name'] for obj in self.data['raw']['objects']]
         return [obj['name'] for obj in self.data.get('objects', [])]
     
     @property
     def scene(self):
+        # Support both old and new format
+        if 'raw' in self.data:
+            scene_data = self.data['raw']['scene']
+            return scene_data['type'] if isinstance(scene_data, dict) else scene_data
         scene_data = self.data.get('scene', 'Unknown scene')
         return scene_data['type'] if isinstance(scene_data, dict) else scene_data
     
     @property
     def confidence(self):
-        confidence = self.data.get('confidence', 0.0)
-        return confidence / 100 if confidence > 1 else confidence
+        # New format returns percentage directly
+        if 'confidence' in self.data and isinstance(self.data['confidence'], (int, float)):
+            return self.data['confidence'] / 100  # Convert back to decimal for compatibility
+        # Old format
+        if 'raw' in self.data:
+            return self.data['raw']['confidence']['overall']
+        return self.data.get('confidence', {}).get('overall', 0.0)
     
     @property
     def instant_insight(self):
@@ -544,20 +564,20 @@ class AnalysisResult:
             return '\n'.join(output)
         else:
             # Fallback to old format
-            return f"Scene: {self.scene}\nSummary: {self.summary}\nObjects: {', '.join(self.objects)}\nConfidence: {self.confidence:.2%}"
+        return f"Scene: {self.scene}\nSummary: {self.summary}\nObjects: {', '.join(self.objects)}\nConfidence: {self.confidence:.2%}"
 
 # Global analyzer instance (lazy loading)
 _analyzer = None
 
 def analyze(image_path: str):
     """
-    Analyze an image and return comprehensive insights with revolutionary relationship detection
+    Analyze an image and return comprehensive insights
     
     Args:
         image_path: Path to image file
     
     Returns:
-        AnalysisResult object with insights and human dynamics
+        AnalysisResult object with insights
     """
     global _analyzer
     if _analyzer is None:

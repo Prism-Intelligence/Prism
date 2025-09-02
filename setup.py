@@ -3,10 +3,10 @@ from setuptools import setup, find_packages
 # Simple setup.py without license issues
 setup(
     name="prismintelligence",
-    version="0.0.1",
-    author="Prism Intelligence",
-    author_email="dev@prism-intelligence.ai",
-    description="AI-Powered Image Intelligence Engine - See what others can't",
+    version="0.1.0",
+    author="Olaoluwasubomi Aduloju & Prism Intelligence",
+    author_email="i@olaoluwasubomi.com",
+    description="Revolutionary AI Behavioral Psychology Engine - FBI-Level Human Relationship Analysis",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     url="https://github.com/Prism-Intelligence/Prism",
@@ -23,7 +23,6 @@ setup(
         "torchvision>=0.10.0", 
         "transformers>=4.20.0",
         "ultralytics>=8.0.0",
-        "clip-by-openai",
         "Pillow>=8.0.0",
         "numpy>=1.21.0",
         "requests>=2.25.0",
